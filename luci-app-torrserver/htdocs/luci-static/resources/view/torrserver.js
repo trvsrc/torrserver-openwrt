@@ -56,12 +56,30 @@ function updateStatus(node, isRunning) {
 	}
 }
 
+function waitForStatus(expectedRunning, maxAttempts) {
+	var attempts = 0;
+	return new Promise(function(resolve) {
+		function check() {
+			getServiceStatus().then(function(isRunning) {
+				attempts++;
+				if (isRunning === expectedRunning || attempts >= maxAttempts) {
+					resolve(isRunning);
+				} else {
+					setTimeout(check, 500);
+				}
+			});
+		}
+		check();
+	});
+}
+
 function handleAction(node, action, btn) {
 	var btnStart = node.querySelector('#btn_start');
 	var btnStop = node.querySelector('#btn_stop');
 	var btnRestart = node.querySelector('#btn_restart');
 
 	var originalText = btn.textContent;
+	var expectRunning = (action === 'start' || action === 'restart');
 
 	btnStart.disabled = true;
 	btnStop.disabled = true;
@@ -70,11 +88,7 @@ function handleAction(node, action, btn) {
 	btn.innerHTML = '<span class="spinning"></span>';
 
 	return callInitAction('torrserver', action).then(function() {
-		return new Promise(function(resolve) {
-			setTimeout(resolve, 1000);
-		});
-	}).then(function() {
-		return getServiceStatus();
+		return waitForStatus(expectRunning, 10);
 	}).then(function(isRunning) {
 		btn.textContent = originalText;
 		updateStatus(node, isRunning);
