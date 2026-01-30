@@ -3,8 +3,12 @@
 'require form';
 'require uci';
 'require rpc';
-'require ui';
 'require poll';
+
+var SERVICE_NAME = 'torrserver';
+var POLL_INTERVAL = 5;
+var STATUS_CHECK_INTERVAL = 500;
+var STATUS_CHECK_MAX_ATTEMPTS = 10;
 
 var callServiceList = rpc.declare({
 	object: 'service',
@@ -21,89 +25,125 @@ var callInitAction = rpc.declare({
 });
 
 function getServiceStatus() {
-	return L.resolveDefault(callServiceList('torrserver'), {}).then(function(res) {
-		var isRunning = false;
+	return L.resolveDefault(callServiceList(SERVICE_NAME), {}).then(function(res) {
 		try {
-			isRunning = res['torrserver']['instances']['instance1']['running'];
-		} catch (e) { }
-		return isRunning;
+			return res[SERVICE_NAME]['instances']['instance1']['running'] === true;
+		} catch (e) {
+			return false;
+		}
 	});
 }
 
-function renderStatus(isRunning) {
-	var spanTemp = '<span id="service_status" style="color:%s;font-weight:bold">%s</span>';
-	if (isRunning) {
-		return String.format(spanTemp, 'green', _('Running'));
-	} else {
-		return String.format(spanTemp, 'red', _('Not running'));
-	}
+function renderStatusHtml(isRunning) {
+	return String.format(
+		'<span id="service_status" style="color:%s;font-weight:bold">%s</span>',
+		isRunning ? 'green' : 'red',
+		isRunning ? _('Running') : _('Not running')
+	);
 }
 
-function updateStatus(node, isRunning) {
+function renderButtonsHtml() {
+	return E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:5px' }, [
+		E('button', {
+			'class': 'btn cbi-button cbi-button-action',
+			'id': 'btn_start'
+		}, _('Start')),
+		E('button', {
+			'class': 'btn cbi-button cbi-button-action',
+			'id': 'btn_restart'
+		}, _('Restart')),
+		E('button', {
+			'class': 'btn cbi-button cbi-button-remove',
+			'id': 'btn_stop',
+			'style': 'border-color:#c44;color:#c44'
+		}, _('Stop')),
+		E('button', {
+			'class': 'btn cbi-button cbi-button-action',
+			'id': 'btn_webui',
+			'style': 'margin-left:15px'
+		}, _('Open Web UI'))
+	]);
+}
+
+function getButtons(node) {
+	return {
+		start: node.querySelector('#btn_start'),
+		stop: node.querySelector('#btn_stop'),
+		restart: node.querySelector('#btn_restart'),
+		webui: node.querySelector('#btn_webui')
+	};
+}
+
+function setButtonsDisabled(buttons, disabled) {
+	buttons.start.disabled = disabled;
+	buttons.stop.disabled = disabled;
+	buttons.restart.disabled = disabled;
+}
+
+function updateButtonStates(buttons, isRunning) {
+	buttons.start.disabled = isRunning;
+	buttons.stop.disabled = !isRunning;
+	buttons.restart.disabled = !isRunning;
+}
+
+function updateStatusDisplay(node, isRunning) {
 	var statusEl = node.querySelector('#service_status');
 	if (statusEl) {
-		statusEl.outerHTML = renderStatus(isRunning);
+		statusEl.outerHTML = renderStatusHtml(isRunning);
 	}
-
-	var btnStart = node.querySelector('#btn_start');
-	var btnStop = node.querySelector('#btn_stop');
-	var btnRestart = node.querySelector('#btn_restart');
-
-	if (btnStart && btnStop && btnRestart) {
-		btnStart.disabled = isRunning;
-		btnStop.disabled = !isRunning;
-		btnRestart.disabled = !isRunning;
-	}
+	updateButtonStates(getButtons(node), isRunning);
 }
 
-function waitForStatus(expectedRunning, maxAttempts) {
+function waitForStatusChange(expectedRunning) {
 	var attempts = 0;
+
 	return new Promise(function(resolve) {
-		function check() {
+		(function check() {
 			getServiceStatus().then(function(isRunning) {
 				attempts++;
-				if (isRunning === expectedRunning || attempts >= maxAttempts) {
+				if (isRunning === expectedRunning || attempts >= STATUS_CHECK_MAX_ATTEMPTS) {
 					resolve(isRunning);
 				} else {
-					setTimeout(check, 500);
+					setTimeout(check, STATUS_CHECK_INTERVAL);
 				}
 			});
-		}
-		check();
+		})();
 	});
 }
 
-function handleAction(node, action, btn) {
-	var btnStart = node.querySelector('#btn_start');
-	var btnStop = node.querySelector('#btn_stop');
-	var btnRestart = node.querySelector('#btn_restart');
-
+function handleServiceAction(node, action, btn) {
+	var buttons = getButtons(node);
 	var originalText = btn.textContent;
-	var expectRunning = (action === 'start' || action === 'restart');
+	var expectRunning = (action !== 'stop');
 
-	btnStart.disabled = true;
-	btnStop.disabled = true;
-	btnRestart.disabled = true;
-
+	setButtonsDisabled(buttons, true);
 	btn.innerHTML = '<span class="spinning"></span>';
 
-	return callInitAction('torrserver', action).then(function() {
-		return waitForStatus(expectRunning, 10);
-	}).then(function(isRunning) {
-		btn.textContent = originalText;
-		updateStatus(node, isRunning);
-	}).catch(function(e) {
-		btn.textContent = originalText;
-		return getServiceStatus().then(function(isRunning) {
-			updateStatus(node, isRunning);
+	return callInitAction(SERVICE_NAME, action)
+		.then(function() {
+			return waitForStatusChange(expectRunning);
+		})
+		.then(function(isRunning) {
+			btn.textContent = originalText;
+			updateStatusDisplay(node, isRunning);
+		})
+		.catch(function() {
+			btn.textContent = originalText;
+			return getServiceStatus().then(function(isRunning) {
+				updateStatusDisplay(node, isRunning);
+			});
 		});
-	});
+}
+
+function openWebUI() {
+	var port = uci.get(SERVICE_NAME, 'main', 'port') || '8090';
+	window.open('http://' + window.location.hostname + ':' + port, '_blank');
 }
 
 return view.extend({
 	load: function() {
 		return Promise.all([
-			uci.load('torrserver'),
+			uci.load(SERVICE_NAME),
 			getServiceStatus()
 		]);
 	},
@@ -112,80 +152,79 @@ return view.extend({
 		var isRunning = data[1];
 		var m, s, o;
 
-		m = new form.Map('torrserver', _('TorrServer'),
-			_('TorrServer streams torrent files directly without waiting for full download. Configure and control the service below.'));
+		m = new form.Map(SERVICE_NAME, _('TorrServer'),
+			_('TorrServer streams torrent files directly without waiting for full download.'));
 
-		s = m.section(form.TypedSection, 'torrserver', _('Service Status'));
+		s = m.section(form.TypedSection, SERVICE_NAME, _('Service Control'));
 		s.anonymous = true;
 
-		o = s.option(form.DummyValue, '_status');
+		o = s.option(form.DummyValue, '_status', _('Status'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<strong>' + _('Status') + ':</strong> ' + renderStatus(isRunning) +
-				'<div style="margin-top:10px">' +
-				'<button class="btn cbi-button cbi-button-action" id="btn_start">' + _('Start') + '</button> ' +
-				'<button class="btn cbi-button cbi-button-action" id="btn_restart">' + _('Restart') + '</button> ' +
-				'<button class="btn cbi-button cbi-button-remove" id="btn_stop" style="border-color:#c44;color:#c44">' + _('Stop') + '</button> ' +
-				'<button class="btn cbi-button cbi-button-action" id="btn_webui" style="margin-left:20px">' + _('Open Web UI') + '</button>' +
-				'</div>';
+			return renderStatusHtml(isRunning);
 		};
 
-		s = m.section(form.TypedSection, 'torrserver', _('Settings'));
+		o = s.option(form.DummyValue, '_buttons');
+		o.rawhtml = true;
+		o.render = function() {
+			return E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }),
+				E('div', { 'class': 'cbi-value-field' }, renderButtonsHtml())
+			]);
+		};
+
+		s = m.section(form.TypedSection, SERVICE_NAME, _('Settings'));
 		s.anonymous = true;
 
 		o = s.option(form.Flag, 'enabled', _('Enable'),
-			_('Enable TorrServer service'));
+			_('Start TorrServer automatically on boot'));
 		o.rmempty = false;
 		o.default = '1';
 
 		o = s.option(form.Value, 'port', _('Port'),
-			_('Web interface port (default: 8090)'));
+			_('Web interface port'));
 		o.datatype = 'port';
 		o.default = '8090';
 		o.rmempty = false;
+		o.placeholder = '8090';
 
 		o = s.option(form.Value, 'data_dir', _('Data Directory'),
-			_('Directory for database and cache'));
+			_('Directory for database and cache files'));
 		o.default = '/opt/torrserver/data';
 		o.rmempty = false;
 
 		return m.render().then(function(node) {
-			var btnStart = node.querySelector('#btn_start');
-			var btnStop = node.querySelector('#btn_stop');
-			var btnRestart = node.querySelector('#btn_restart');
+			var buttons = getButtons(node);
 
-			btnStart.addEventListener('click', function() {
-				handleAction(node, 'start', btnStart);
+			buttons.start.addEventListener('click', function() {
+				handleServiceAction(node, 'start', buttons.start);
 			});
 
-			btnStop.addEventListener('click', function() {
-				handleAction(node, 'stop', btnStop);
+			buttons.stop.addEventListener('click', function() {
+				handleServiceAction(node, 'stop', buttons.stop);
 			});
 
-			btnRestart.addEventListener('click', function() {
-				handleAction(node, 'restart', btnRestart);
+			buttons.restart.addEventListener('click', function() {
+				handleServiceAction(node, 'restart', buttons.restart);
 			});
 
-			node.querySelector('#btn_webui').addEventListener('click', function() {
-				var currentPort = uci.get('torrserver', 'main', 'port') || '8090';
-				window.open('http://' + window.location.hostname + ':' + currentPort, '_blank');
-			});
+			buttons.webui.addEventListener('click', openWebUI);
 
-			updateStatus(node, isRunning);
+			updateStatusDisplay(node, isRunning);
 
 			poll.add(function() {
 				return getServiceStatus().then(function(running) {
-					updateStatus(node, running);
+					updateStatusDisplay(node, running);
 				});
-			}, 5);
+			}, POLL_INTERVAL);
 
 			return node;
 		});
 	},
 
-	handleSaveApply: function(ev, mode) {
+	handleSaveApply: function(ev) {
 		return this.handleSave(ev).then(function() {
-			return callInitAction('torrserver', 'restart');
+			return callInitAction(SERVICE_NAME, 'restart');
 		});
 	}
 });
