@@ -56,14 +56,18 @@ function updateStatus(node, isRunning) {
 	}
 }
 
-function handleAction(node, action) {
+function handleAction(node, action, btn) {
 	var btnStart = node.querySelector('#btn_start');
 	var btnStop = node.querySelector('#btn_stop');
 	var btnRestart = node.querySelector('#btn_restart');
 
+	var originalText = btn.textContent;
+
 	btnStart.disabled = true;
 	btnStop.disabled = true;
 	btnRestart.disabled = true;
+
+	btn.innerHTML = '<span class="spinning"></span>';
 
 	return callInitAction('torrserver', action).then(function() {
 		return new Promise(function(resolve) {
@@ -72,10 +76,10 @@ function handleAction(node, action) {
 	}).then(function() {
 		return getServiceStatus();
 	}).then(function(isRunning) {
+		btn.textContent = originalText;
 		updateStatus(node, isRunning);
-		ui.addNotification(null, E('p', _('Service action completed: ') + action), 'info');
 	}).catch(function(e) {
-		ui.addNotification(null, E('p', _('Service action failed: ') + e.message), 'error');
+		btn.textContent = originalText;
 		return getServiceStatus().then(function(isRunning) {
 			updateStatus(node, isRunning);
 		});
@@ -135,16 +139,20 @@ return view.extend({
 		o.rmempty = false;
 
 		return m.render().then(function(node) {
-			node.querySelector('#btn_start').addEventListener('click', function() {
-				handleAction(node, 'start');
+			var btnStart = node.querySelector('#btn_start');
+			var btnStop = node.querySelector('#btn_stop');
+			var btnRestart = node.querySelector('#btn_restart');
+
+			btnStart.addEventListener('click', function() {
+				handleAction(node, 'start', btnStart);
 			});
 
-			node.querySelector('#btn_stop').addEventListener('click', function() {
-				handleAction(node, 'stop');
+			btnStop.addEventListener('click', function() {
+				handleAction(node, 'stop', btnStop);
 			});
 
-			node.querySelector('#btn_restart').addEventListener('click', function() {
-				handleAction(node, 'restart');
+			btnRestart.addEventListener('click', function() {
+				handleAction(node, 'restart', btnRestart);
 			});
 
 			node.querySelector('#btn_webui').addEventListener('click', function() {
@@ -167,8 +175,6 @@ return view.extend({
 	handleSaveApply: function(ev, mode) {
 		return this.handleSave(ev).then(function() {
 			return callInitAction('torrserver', 'restart');
-		}).then(function() {
-			ui.addNotification(null, E('p', _('Configuration saved and service restarted')), 'info');
 		});
 	}
 });
