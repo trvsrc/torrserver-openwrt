@@ -31,7 +31,7 @@ function getServiceStatus() {
 }
 
 function renderStatus(isRunning) {
-	var spanTemp = '<span style="color:%s;font-weight:bold">%s</span>';
+	var spanTemp = '<span id="service_status" style="color:%s;font-weight:bold">%s</span>';
 	if (isRunning) {
 		return String.format(spanTemp, 'green', _('Running'));
 	} else {
@@ -40,9 +40,9 @@ function renderStatus(isRunning) {
 }
 
 function updateStatus(node, isRunning) {
-	var statusEl = node.querySelector('[data-name="_status"] .cbi-value-field');
+	var statusEl = node.querySelector('#service_status');
 	if (statusEl) {
-		statusEl.innerHTML = renderStatus(isRunning);
+		statusEl.outerHTML = renderStatus(isRunning);
 	}
 
 	var btnStart = node.querySelector('#btn_start');
@@ -118,19 +118,16 @@ return view.extend({
 		s = m.section(form.TypedSection, 'torrserver', _('Service Status'));
 		s.anonymous = true;
 
-		o = s.option(form.DummyValue, '_status', _('Status'));
+		o = s.option(form.DummyValue, '_status');
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return renderStatus(isRunning);
-		};
-
-		o = s.option(form.DummyValue, '_buttons', ' ');
-		o.rawhtml = true;
-		o.cfgvalue = function() {
-			return '<button class="btn cbi-button cbi-button-action" id="btn_start">' + _('Start') + '</button> ' +
+			return '<strong>' + _('Status') + ':</strong> ' + renderStatus(isRunning) +
+				'<div style="margin-top:10px">' +
+				'<button class="btn cbi-button cbi-button-action" id="btn_start">' + _('Start') + '</button> ' +
 				'<button class="btn cbi-button cbi-button-action" id="btn_restart">' + _('Restart') + '</button> ' +
 				'<button class="btn cbi-button cbi-button-remove" id="btn_stop" style="border-color:#c44;color:#c44">' + _('Stop') + '</button> ' +
-				'<button class="btn cbi-button cbi-button-action" id="btn_webui" style="margin-left:20px">' + _('Open Web UI') + '</button>';
+				'<button class="btn cbi-button cbi-button-action" id="btn_webui" style="margin-left:20px">' + _('Open Web UI') + '</button>' +
+				'</div>';
 		};
 
 		s = m.section(form.TypedSection, 'torrserver', _('Settings'));
