@@ -1,0 +1,22 @@
+{
+	"luci-app-torrserver": {
+		"description": "Grant access to TorrServer configuration",
+		"read": {
+			"uci": ["torrserver"],
+			"ubus": {
+				"service": ["list"],
+				"luci": ["getInitList", "getLocaltime"]
+			},
+			"file": {
+				"/opt/torrserver/torrserver": ["stat"],
+				"/etc/init.d/torrserver": ["stat"]
+			}
+		},
+		"write": {
+			"uci": ["torrserver"],
+			"ubus": {
+				"luci": ["setInitAction"]
+			}
+		}
+	}
+}

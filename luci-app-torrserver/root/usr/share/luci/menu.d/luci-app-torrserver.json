@@ -1,0 +1,14 @@
+{
+	"admin/services/torrserver": {
+		"title": "TorrServer",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "torrserver"
+		},
+		"depends": {
+			"acl": ["luci-app-torrserver"],
+			"uci": {"torrserver": true}
+		}
+	}
+}

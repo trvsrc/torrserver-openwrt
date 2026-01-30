@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# Create default config if it doesn't exist
+if [ ! -f /etc/config/torrserver ]; then
+    cat > /etc/config/torrserver << 'EOF'
+config torrserver 'main'
+	option enabled '1'
+	option port '8090'
+	option data_dir '/opt/torrserver/data'
+EOF
+fi
+
+# Ensure data directory exists
+mkdir -p /opt/torrserver/data
+
+exit 0

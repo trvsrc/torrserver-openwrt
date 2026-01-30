@@ -1,13 +1,14 @@
 # TorrServer for OpenWrt
 
-Install [TorrServer](https://github.com/YouROK/TorrServer) on OpenWrt routers.
+Install [TorrServer](https://github.com/YouROK/TorrServer) on OpenWrt routers with LuCI web interface integration.
 
 Tested on **GL-iNet MT6000** (MediaTek MT7986A, ARM Cortex-A53).
 
 ## Features
 
 - Automatic download of the latest TorrServer release
-- OpenWrt procd service integration
+- **LuCI web interface** for easy control
+- OpenWrt procd service integration with UCI configuration
 - Auto-start on boot
 - Simple install/update/uninstall commands
 
@@ -32,16 +33,33 @@ Or with curl:
 curl -fsSL https://raw.githubusercontent.com/trvsrc/torrserver-openwrt/main/install.sh | sh
 ```
 
-## Alternative Install
+### Install without LuCI
+
+If you don't want the LuCI web interface:
 
 ```bash
-# Download and run manually
-wget https://raw.githubusercontent.com/trvsrc/torrserver-openwrt/main/install.sh
-chmod +x install.sh
-./install.sh install
+wget -O - https://raw.githubusercontent.com/trvsrc/torrserver-openwrt/main/install.sh | sh -s install-bare
 ```
 
+## LuCI Web Interface
+
+After installation, access TorrServer control panel in LuCI:
+
+```
+http://<router-ip>/cgi-bin/luci/admin/services/torrserver
+```
+
+The LuCI interface provides:
+- Service status (running/stopped)
+- Start/Stop/Restart buttons
+- Enable/Disable autostart
+- Port configuration
+- Data directory setting
+- Direct link to TorrServer web UI
+
 ## Usage
+
+### TorrServer Web UI
 
 After installation, TorrServer will be available at:
 
@@ -61,9 +79,6 @@ http://<router-ip>:8090
 # Restart TorrServer
 /etc/init.d/torrserver restart
 
-# Check status
-/etc/init.d/torrserver status
-
 # Enable auto-start on boot
 /etc/init.d/torrserver enable
 
@@ -74,38 +89,59 @@ http://<router-ip>:8090
 ### Update TorrServer
 
 ```bash
-./install.sh update
+wget -O /tmp/install.sh https://raw.githubusercontent.com/trvsrc/torrserver-openwrt/main/install.sh
+sh /tmp/install.sh update
 ```
 
 ### Uninstall
 
 ```bash
-./install.sh uninstall
+wget -O /tmp/install.sh https://raw.githubusercontent.com/trvsrc/torrserver-openwrt/main/install.sh
+sh /tmp/install.sh uninstall
 ```
 
 ## Configuration
 
-TorrServer files are stored in:
+### UCI Configuration
+
+TorrServer uses OpenWrt's UCI system for configuration:
+
+```bash
+# View current config
+uci show torrserver
+
+# Change port
+uci set torrserver.main.port='9090'
+uci commit torrserver
+/etc/init.d/torrserver restart
+
+# Change data directory
+uci set torrserver.main.data_dir='/mnt/usb/torrserver'
+uci commit torrserver
+/etc/init.d/torrserver restart
+
+# Disable service
+uci set torrserver.main.enabled='0'
+uci commit torrserver
+/etc/init.d/torrserver restart
+```
+
+### File Locations
 
 | Path | Description |
 |------|-------------|
 | `/opt/torrserver/torrserver` | Binary executable |
 | `/opt/torrserver/data/` | Database and cache |
+| `/etc/config/torrserver` | UCI configuration |
 | `/etc/init.d/torrserver` | Service script |
 
-### Changing the Port
+### LuCI App Files
 
-Edit `/etc/init.d/torrserver` and change the `PORT` variable:
-
-```bash
-PORT="8090"  # Change to your preferred port
-```
-
-Then restart the service:
-
-```bash
-/etc/init.d/torrserver restart
-```
+| Path | Description |
+|------|-------------|
+| `/www/luci-static/resources/view/torrserver.js` | LuCI view |
+| `/usr/share/luci/menu.d/luci-app-torrserver.json` | Menu entry |
+| `/usr/share/rpcd/acl.d/luci-app-torrserver.json` | ACL permissions |
 
 ## Storage Considerations
 
@@ -143,9 +179,18 @@ Check logs:
 logread | grep torrserver
 ```
 
+### LuCI page not showing
+
+Restart rpcd and uhttpd:
+
+```bash
+/etc/init.d/rpcd restart
+/etc/init.d/uhttpd restart
+```
+
 ### Port already in use
 
-Change the port in `/etc/init.d/torrserver` and restart.
+Change the port via UCI or LuCI and restart.
 
 ### Out of memory
 

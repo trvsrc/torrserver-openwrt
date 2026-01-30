@@ -9,6 +9,7 @@ set -e
 INSTALL_DIR="/opt/torrserver"
 BINARY_NAME="TorrServer-linux-arm64"
 REPO="YouROK/TorrServer"
+LUCI_REPO="trvsrc/torrserver-openwrt"
 SERVICE_NAME="torrserver"
 
 # Colors for output
@@ -54,6 +55,17 @@ check_dependencies() {
     log_info "Using $DOWNLOADER for downloads"
 }
 
+download_file() {
+    local url="$1"
+    local dest="$2"
+
+    if [ "$DOWNLOADER" = "curl" ]; then
+        curl -fsSL -o "$dest" "$url"
+    else
+        wget -q -O "$dest" "$url"
+    fi
+}
+
 get_latest_version() {
     log_info "Fetching latest version..."
 
@@ -79,15 +91,23 @@ download_binary() {
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}"
 
     mkdir -p "$INSTALL_DIR"
-
-    if [ "$DOWNLOADER" = "curl" ]; then
-        curl -L -o "${INSTALL_DIR}/torrserver" "$DOWNLOAD_URL"
-    else
-        wget -O "${INSTALL_DIR}/torrserver" "$DOWNLOAD_URL"
-    fi
-
+    download_file "$DOWNLOAD_URL" "${INSTALL_DIR}/torrserver"
     chmod +x "${INSTALL_DIR}/torrserver"
     log_info "Binary installed to ${INSTALL_DIR}/torrserver"
+}
+
+install_uci_config() {
+    log_info "Installing UCI configuration..."
+
+    if [ ! -f /etc/config/torrserver ]; then
+        cat > /etc/config/torrserver << 'EOF'
+config torrserver 'main'
+	option enabled '1'
+	option port '8090'
+	option data_dir '/opt/torrserver/data'
+EOF
+    fi
+    log_info "UCI config installed to /etc/config/torrserver"
 }
 
 install_init_script() {
@@ -96,7 +116,7 @@ install_init_script() {
     cat > /etc/init.d/torrserver << 'INITEOF'
 #!/bin/sh /etc/rc.common
 #
-# TorrServer init script for OpenWrt (procd)
+# TorrServer init script for OpenWrt (procd + UCI)
 #
 
 START=99
@@ -104,16 +124,29 @@ STOP=10
 USE_PROCD=1
 
 PROG="/opt/torrserver/torrserver"
-DATADIR="/opt/torrserver/data"
-PORT="8090"
+NAME="torrserver"
 
 start_service() {
-    mkdir -p "$DATADIR"
+    config_load "$NAME"
+
+    local enabled port data_dir
+    config_get enabled main enabled "1"
+    config_get port main port "8090"
+    config_get data_dir main data_dir "/opt/torrserver/data"
+
+    [ "$enabled" = "0" ] && return 0
+
+    [ ! -f "$PROG" ] && {
+        logger -t "$NAME" "Binary not found: $PROG"
+        return 1
+    }
+
+    mkdir -p "$data_dir"
 
     procd_open_instance
     procd_set_param command "$PROG"
-    procd_append_param command -p "$PORT"
-    procd_append_param command -d "$DATADIR"
+    procd_append_param command -p "$port"
+    procd_append_param command -d "$data_dir"
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -126,27 +159,46 @@ stop_service() {
 }
 
 service_triggers() {
-    procd_add_reload_trigger "torrserver"
+    procd_add_reload_trigger "$NAME"
 }
 
 reload_service() {
     stop
     start
 }
-
-status() {
-    if pgrep -x torrserver >/dev/null; then
-        echo "TorrServer is running (PID: $(pgrep -x torrserver))"
-        return 0
-    else
-        echo "TorrServer is not running"
-        return 1
-    fi
-}
 INITEOF
 
     chmod +x /etc/init.d/torrserver
     log_info "Init script installed to /etc/init.d/torrserver"
+}
+
+install_luci() {
+    log_info "Installing LuCI application..."
+
+    LUCI_BASE="https://raw.githubusercontent.com/${LUCI_REPO}/main/luci-app-torrserver"
+
+    # Create directories
+    mkdir -p /www/luci-static/resources/view
+    mkdir -p /usr/share/luci/menu.d
+    mkdir -p /usr/share/rpcd/acl.d
+
+    # Download LuCI files
+    log_info "Downloading LuCI view..."
+    download_file "${LUCI_BASE}/htdocs/luci-static/resources/view/torrserver.js" \
+        /www/luci-static/resources/view/torrserver.js
+
+    log_info "Downloading menu configuration..."
+    download_file "${LUCI_BASE}/root/usr/share/luci/menu.d/luci-app-torrserver.json" \
+        /usr/share/luci/menu.d/luci-app-torrserver.json
+
+    log_info "Downloading ACL configuration..."
+    download_file "${LUCI_BASE}/root/usr/share/rpcd/acl.d/luci-app-torrserver.json" \
+        /usr/share/rpcd/acl.d/luci-app-torrserver.json
+
+    # Restart rpcd to pick up new ACL
+    /etc/init.d/rpcd restart 2>/dev/null || true
+
+    log_info "LuCI application installed"
 }
 
 create_data_dir() {
@@ -161,24 +213,40 @@ enable_service() {
     log_info "Service enabled"
 }
 
-start_service() {
+start_service_now() {
     log_info "Starting TorrServer..."
     /etc/init.d/torrserver start
     log_info "TorrServer started"
 }
 
 show_status() {
+    local port=$(uci -q get torrserver.main.port || echo "8090")
     echo ""
     log_info "Installation complete!"
     echo ""
-    echo "TorrServer is now running on port 8090"
-    echo "Web interface: http://<router-ip>:8090"
+    echo "TorrServer is now running on port $port"
+    echo "Web interface: http://<router-ip>:$port"
+    echo "LuCI control: http://<router-ip>/cgi-bin/luci/admin/services/torrserver"
     echo ""
     echo "Useful commands:"
     echo "  /etc/init.d/torrserver start   - Start service"
     echo "  /etc/init.d/torrserver stop    - Stop service"
     echo "  /etc/init.d/torrserver restart - Restart service"
-    echo "  /etc/init.d/torrserver status  - Check status"
+    echo ""
+}
+
+show_status_noluci() {
+    local port=$(uci -q get torrserver.main.port || echo "8090")
+    echo ""
+    log_info "Installation complete!"
+    echo ""
+    echo "TorrServer is now running on port $port"
+    echo "Web interface: http://<router-ip>:$port"
+    echo ""
+    echo "Useful commands:"
+    echo "  /etc/init.d/torrserver start   - Start service"
+    echo "  /etc/init.d/torrserver stop    - Stop service"
+    echo "  /etc/init.d/torrserver restart - Restart service"
     echo ""
 }
 
@@ -189,9 +257,25 @@ uninstall() {
     /etc/init.d/torrserver disable 2>/dev/null || true
 
     rm -f /etc/init.d/torrserver
+    rm -f /etc/config/torrserver
+    rm -f /www/luci-static/resources/view/torrserver.js
+    rm -f /usr/share/luci/menu.d/luci-app-torrserver.json
+    rm -f /usr/share/rpcd/acl.d/luci-app-torrserver.json
     rm -rf "$INSTALL_DIR"
 
+    # Restart rpcd to remove ACL
+    /etc/init.d/rpcd restart 2>/dev/null || true
+
     log_info "TorrServer uninstalled"
+}
+
+show_status_luci_only() {
+    local port=$(uci -q get torrserver.main.port || echo "8090")
+    echo ""
+    log_info "LuCI application installed!"
+    echo ""
+    echo "LuCI control: http://<router-ip>/cgi-bin/luci/admin/services/torrserver"
+    echo ""
 }
 
 usage() {
@@ -200,10 +284,12 @@ usage() {
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  install   - Install TorrServer (default)"
-    echo "  update    - Update to latest version"
-    echo "  uninstall - Remove TorrServer"
-    echo "  help      - Show this help"
+    echo "  install      - Install TorrServer with LuCI web interface (default)"
+    echo "  install-bare - Install TorrServer without LuCI"
+    echo "  install-luci - Add LuCI interface to existing installation"
+    echo "  update       - Update to latest version"
+    echo "  uninstall    - Remove TorrServer completely"
+    echo "  help         - Show this help"
     echo ""
 }
 
@@ -214,11 +300,34 @@ main() {
             check_dependencies
             get_latest_version
             download_binary
+            install_uci_config
+            install_init_script
+            create_data_dir
+            install_luci
+            enable_service
+            start_service_now
+            show_status
+            ;;
+        install-bare)
+            check_root
+            check_dependencies
+            get_latest_version
+            download_binary
+            install_uci_config
             install_init_script
             create_data_dir
             enable_service
-            start_service
-            show_status
+            start_service_now
+            show_status_noluci
+            ;;
+        install-luci)
+            check_root
+            check_dependencies
+            install_uci_config
+            install_init_script
+            install_luci
+            /etc/init.d/torrserver restart 2>/dev/null || true
+            show_status_luci_only
             ;;
         update)
             check_root
