@@ -109,10 +109,10 @@ return view.extend({
 		o = s.option(form.DummyValue, '_buttons', ' ');
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<button class="btn cbi-button cbi-button-apply" id="btn_start">' + _('Start') + '</button> ' +
-				'<button class="btn cbi-button cbi-button-neutral" id="btn_stop">' + _('Stop') + '</button> ' +
+			return '<button class="btn cbi-button cbi-button-action" id="btn_start">' + _('Start') + '</button> ' +
 				'<button class="btn cbi-button cbi-button-action" id="btn_restart">' + _('Restart') + '</button> ' +
-				'<button class="btn cbi-button cbi-button-positive" id="btn_webui" style="margin-left:20px">' + _('Open Web UI') + '</button>';
+				'<button class="btn cbi-button cbi-button-remove" id="btn_stop" style="border-color:#c44;color:#c44">' + _('Stop') + '</button> ' +
+				'<button class="btn cbi-button cbi-button-action" id="btn_webui" style="margin-left:20px">' + _('Open Web UI') + '</button>';
 		};
 
 		s = m.section(form.TypedSection, 'torrserver', _('Settings'));
