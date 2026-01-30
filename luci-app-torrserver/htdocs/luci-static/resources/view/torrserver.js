@@ -32,13 +32,54 @@ function getServiceStatus() {
 
 function renderStatus(isRunning) {
 	var spanTemp = '<span style="color:%s;font-weight:bold">%s</span>';
-	var renderHTML;
 	if (isRunning) {
-		renderHTML = String.format(spanTemp, 'green', _('Running'));
+		return String.format(spanTemp, 'green', _('Running'));
 	} else {
-		renderHTML = String.format(spanTemp, 'red', _('Not running'));
+		return String.format(spanTemp, 'red', _('Not running'));
 	}
-	return renderHTML;
+}
+
+function updateStatus(node, isRunning) {
+	var statusEl = node.querySelector('[data-name="_status"] .cbi-value-field');
+	if (statusEl) {
+		statusEl.innerHTML = renderStatus(isRunning);
+	}
+
+	var btnStart = node.querySelector('#btn_start');
+	var btnStop = node.querySelector('#btn_stop');
+	var btnRestart = node.querySelector('#btn_restart');
+
+	if (btnStart && btnStop && btnRestart) {
+		btnStart.disabled = isRunning;
+		btnStop.disabled = !isRunning;
+		btnRestart.disabled = !isRunning;
+	}
+}
+
+function handleAction(node, action) {
+	var btnStart = node.querySelector('#btn_start');
+	var btnStop = node.querySelector('#btn_stop');
+	var btnRestart = node.querySelector('#btn_restart');
+
+	btnStart.disabled = true;
+	btnStop.disabled = true;
+	btnRestart.disabled = true;
+
+	return callInitAction('torrserver', action).then(function() {
+		return new Promise(function(resolve) {
+			setTimeout(resolve, 1000);
+		});
+	}).then(function() {
+		return getServiceStatus();
+	}).then(function(isRunning) {
+		updateStatus(node, isRunning);
+		ui.addNotification(null, E('p', _('Service action completed: ') + action), 'info');
+	}).catch(function(e) {
+		ui.addNotification(null, E('p', _('Service action failed: ') + e.message), 'error');
+		return getServiceStatus().then(function(isRunning) {
+			updateStatus(node, isRunning);
+		});
+	});
 }
 
 return view.extend({
@@ -68,7 +109,6 @@ return view.extend({
 		o = s.option(form.DummyValue, '_buttons', ' ');
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			var port = uci.get('torrserver', 'main', 'port') || '8090';
 			return '<button class="btn cbi-button cbi-button-apply" id="btn_start">' + _('Start') + '</button> ' +
 				'<button class="btn cbi-button cbi-button-neutral" id="btn_stop">' + _('Stop') + '</button> ' +
 				'<button class="btn cbi-button cbi-button-action" id="btn_restart">' + _('Restart') + '</button> ' +
@@ -95,36 +135,16 @@ return view.extend({
 		o.rmempty = false;
 
 		return m.render().then(function(node) {
-			var port = uci.get('torrserver', 'main', 'port') || '8090';
-
 			node.querySelector('#btn_start').addEventListener('click', function() {
-				ui.showModal(_('Starting TorrServer'), [
-					E('p', { class: 'spinning' }, _('Please wait...'))
-				]);
-				callInitAction('torrserver', 'start').then(function() {
-					ui.hideModal();
-					window.location.reload();
-				});
+				handleAction(node, 'start');
 			});
 
 			node.querySelector('#btn_stop').addEventListener('click', function() {
-				ui.showModal(_('Stopping TorrServer'), [
-					E('p', { class: 'spinning' }, _('Please wait...'))
-				]);
-				callInitAction('torrserver', 'stop').then(function() {
-					ui.hideModal();
-					window.location.reload();
-				});
+				handleAction(node, 'stop');
 			});
 
 			node.querySelector('#btn_restart').addEventListener('click', function() {
-				ui.showModal(_('Restarting TorrServer'), [
-					E('p', { class: 'spinning' }, _('Please wait...'))
-				]);
-				callInitAction('torrserver', 'restart').then(function() {
-					ui.hideModal();
-					window.location.reload();
-				});
+				handleAction(node, 'restart');
 			});
 
 			node.querySelector('#btn_webui').addEventListener('click', function() {
@@ -132,12 +152,11 @@ return view.extend({
 				window.open('http://' + window.location.hostname + ':' + currentPort, '_blank');
 			});
 
+			updateStatus(node, isRunning);
+
 			poll.add(function() {
 				return getServiceStatus().then(function(running) {
-					var statusEl = node.querySelector('[data-name="_status"] .cbi-value-field');
-					if (statusEl) {
-						statusEl.innerHTML = renderStatus(running);
-					}
+					updateStatus(node, running);
 				});
 			}, 5);
 
@@ -147,13 +166,9 @@ return view.extend({
 
 	handleSaveApply: function(ev, mode) {
 		return this.handleSave(ev).then(function() {
-			ui.showModal(_('Applying changes'), [
-				E('p', { class: 'spinning' }, _('Restarting service...'))
-			]);
-			return callInitAction('torrserver', 'restart').then(function() {
-				ui.hideModal();
-				window.location.reload();
-			});
+			return callInitAction('torrserver', 'restart');
+		}).then(function() {
+			ui.addNotification(null, E('p', _('Configuration saved and service restarted')), 'info');
 		});
 	}
 });
