@@ -158,10 +158,13 @@ return view.extend({
 		s = m.section(form.TypedSection, SERVICE_NAME, _('Service Control'));
 		s.anonymous = true;
 
-		o = s.option(form.DummyValue, '_status', _('Status'));
+		o = s.option(form.DummyValue, '_status');
 		o.rawhtml = true;
-		o.cfgvalue = function() {
-			return renderStatusHtml(isRunning);
+		o.render = function() {
+			return E('div', { 'class': 'cbi-value', 'style': 'display:flex;align-items:baseline' }, [
+				E('label', { 'class': 'cbi-value-title' }, _('Status')),
+				E('div', { 'class': 'cbi-value-field' }, renderStatusHtml(isRunning))
+			]);
 		};
 
 		o = s.option(form.DummyValue, '_buttons');
